@@ -4,3 +4,4 @@ i woke up this morning and i wanted to build a desmos clone, which is this proje
 
 Example photos (later photos are more recent)
 ![](./docs/img1.png)
+![](./docs/img2.png)
