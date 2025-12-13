@@ -89,9 +89,6 @@ pub const GraphRenderer = struct {
             // Skip if no AST
             if (eq.equation_ast == null) continue;
 
-            // Debug: print equation type
-            std.debug.print("Plotting equation type: {s}\n", .{@tagName(eq.equation_type)});
-
             // Skip assignments (they don't plot)
             if (eq.equation_type == .assignment) continue;
 
@@ -175,9 +172,6 @@ const MarchingSquares = struct {
         const y_min = viewport.screenToGraphY(height_f);
         const y_max = viewport.screenToGraphY(0.0);
 
-        std.debug.print("Marching squares: cell_size={d}, x_min={d}, x_max={d}, y_min={d}, y_max={d}\n",
-            .{cell_size, x_min, x_max, y_min, y_max});
-
         var cells_processed: usize = 0;
         var cells_drawn: usize = 0;
 
@@ -191,8 +185,6 @@ const MarchingSquares = struct {
                 if (drew) cells_drawn += 1;
             }
         }
-
-        std.debug.print("Marching squares: processed {d} cells, drew {d} cells\n", .{cells_processed, cells_drawn});
     }
 
     fn processCell(
