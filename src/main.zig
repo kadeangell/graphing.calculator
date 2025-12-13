@@ -93,42 +93,164 @@ pub fn main() anyerror!void {
         const center_y_f: f32 = @floatFromInt(center_y);
         const grid_spacing_f: f32 = @floatFromInt(grid_spacing);
 
+        // Create evaluation context with x and y variables
+        var eval_context = std.StringHashMap(f32).init(allocator);
+        defer eval_context.deinit();
+        try eval_context.put("x", 0.0);
+        try eval_context.put("y", 0.0);
+
+        // Build dependency graph and evaluate assignments
+        var dep_graph = equation.DependencyGraph.init(allocator);
+        defer dep_graph.deinit();
+
+        try dep_graph.build(equations.items);
+        const eval_order = dep_graph.topologicalSort(equations.items.len) catch |err| blk: {
+            // If there's a circular dependency, just use original order
+            if (err == error.CircularDependency) {
+                var order = try allocator.alloc(usize, equations.items.len);
+                for (0..equations.items.len) |i| {
+                    order[i] = i;
+                }
+                break :blk order;
+            } else {
+                return err;
+            }
+        };
+        defer allocator.free(eval_order);
+
+        // Evaluate assignments in dependency order
+        for (eval_order) |idx| {
+            const eq = equations.items[idx];
+            if (eq.equation_type == .assignment) {
+                if (eq.evaluate(eval_context)) |value| {
+                    // Get the variable name from the assignment
+                    if (eq.equation_ast) |eq_ast| {
+                        if (eq_ast == .assignment) {
+                            try eval_context.put(eq_ast.assignment.var_name, value);
+                        }
+                    }
+                } else |_| {
+                    // Ignore errors in assignments for now
+                }
+            }
+        }
+
+        // Plot equations
         for (equations.items) |eq| {
             // Skip equations with errors or no AST
-            if (eq.has_error or eq.ast == null) continue;
+            if (eq.has_error or eq.equation_ast == null) continue;
 
-            // Plot the function
-            var prev_screen_x: ?f32 = null;
-            var prev_screen_y: ?f32 = null;
+            // Skip assignments (they don't plot)
+            if (eq.equation_type == .assignment) continue;
 
-            var screen_x: f32 = @floatFromInt(sidebar_width);
-            while (screen_x < @as(f32, @floatFromInt(width))) : (screen_x += 1.0) {
-                // Convert screen x to graph x
-                const graph_x = (screen_x - center_x_f) / grid_spacing_f;
+            // Handle different equation types
+            if (eq.equation_type == .constraint_implicit) {
+                // Try simple constraint solving first (x = y^2 style)
+                const can_solve_simple = blk: {
+                    _ = eq.evaluateConstraint(eval_context, "x") catch {
+                        break :blk false;
+                    };
+                    break :blk true;
+                };
 
-                // Evaluate function using AST
-                const graph_y = eq.evaluate(graph_x, allocator) catch continue;
+                if (can_solve_simple) {
+                    // Simple constraint: sample y, solve for x
+                    var prev_screen_x: ?f32 = null;
+                    var prev_screen_y: ?f32 = null;
 
-                // Convert graph y to screen y
-                const screen_y = center_y_f - (graph_y * grid_spacing_f);
+                    var screen_y: f32 = 0.0;
+                    const height_f: f32 = @floatFromInt(height);
+                    while (screen_y < height_f) : (screen_y += 1.0) {
+                        const graph_y = (center_y_f - screen_y) / grid_spacing_f;
+                        try eval_context.put("y", graph_y);
 
-                // Draw line from previous point
-                if (prev_screen_x) |px| {
-                    if (prev_screen_y) |py| {
-                        // Only draw if both points are reasonable
-                        if (@abs(screen_y - py) < 1000) {
-                            rl.drawLineEx(
-                                .{ .x = px, .y = py },
-                                .{ .x = screen_x, .y = screen_y },
-                                2.0,
-                                eq.color
-                            );
+                        const graph_x = eq.evaluateConstraint(eval_context, "x") catch continue;
+                        const screen_x = center_x_f + (graph_x * grid_spacing_f);
+
+                        if (screen_x < @as(f32, @floatFromInt(sidebar_width)) or screen_x >= @as(f32, @floatFromInt(width))) {
+                            prev_screen_x = null;
+                            prev_screen_y = null;
+                            continue;
+                        }
+
+                        if (prev_screen_x) |px| {
+                            if (prev_screen_y) |py| {
+                                if (@abs(screen_x - px) < 1000) {
+                                    rl.drawLineEx(
+                                        .{ .x = px, .y = py },
+                                        .{ .x = screen_x, .y = screen_y },
+                                        2.0,
+                                        eq.color
+                                    );
+                                }
+                            }
+                        }
+
+                        prev_screen_x = screen_x;
+                        prev_screen_y = screen_y;
+                    }
+                } else {
+                    // Complex constraint (like x^2+y^2=r^2): use grid sampling
+                    const tolerance: f32 = 0.5; // Tolerance for equality check
+                    const step: f32 = 2.0; // Sample every 2 pixels for performance
+
+                    var screen_y: f32 = 0.0;
+                    const height_f: f32 = @floatFromInt(height);
+                    while (screen_y < height_f) : (screen_y += step) {
+                        var screen_x: f32 = @floatFromInt(sidebar_width);
+                        while (screen_x < @as(f32, @floatFromInt(width))) : (screen_x += step) {
+                            // Convert to graph coordinates
+                            const graph_x = (screen_x - center_x_f) / grid_spacing_f;
+                            const graph_y = (center_y_f - screen_y) / grid_spacing_f;
+
+                            try eval_context.put("x", graph_x);
+                            try eval_context.put("y", graph_y);
+
+                            // Check if this point satisfies the constraint
+                            if (eq.checkConstraintSatisfied(eval_context, tolerance) catch false) {
+                                // Draw a small point
+                                rl.drawCircle(@intFromFloat(screen_x), @intFromFloat(screen_y), 1.5, eq.color);
+                            }
                         }
                     }
                 }
+            } else {
+                // Plot regular functions (implicit and explicit)
+                var prev_screen_x: ?f32 = null;
+                var prev_screen_y: ?f32 = null;
 
-                prev_screen_x = screen_x;
-                prev_screen_y = screen_y;
+                var screen_x: f32 = @floatFromInt(sidebar_width);
+                while (screen_x < @as(f32, @floatFromInt(width))) : (screen_x += 1.0) {
+                    // Convert screen x to graph x
+                    const graph_x = (screen_x - center_x_f) / grid_spacing_f;
+
+                    // Update x in context
+                    try eval_context.put("x", graph_x);
+
+                    // Evaluate function using context
+                    const graph_y = eq.evaluate(eval_context) catch continue;
+
+                    // Convert graph y to screen y
+                    const screen_y = center_y_f - (graph_y * grid_spacing_f);
+
+                    // Draw line from previous point
+                    if (prev_screen_x) |px| {
+                        if (prev_screen_y) |py| {
+                            // Only draw if both points are reasonable
+                            if (@abs(screen_y - py) < 1000) {
+                                rl.drawLineEx(
+                                    .{ .x = px, .y = py },
+                                    .{ .x = screen_x, .y = screen_y },
+                                    2.0,
+                                    eq.color
+                                );
+                            }
+                        }
+                    }
+
+                    prev_screen_x = screen_x;
+                    prev_screen_y = screen_y;
+                }
             }
         }
 
@@ -149,17 +271,26 @@ pub fn main() anyerror!void {
 
         // Display all equations
         var eq_y: f32 = 90;
-        for (equations.items, 0..) |eq, i| {
-            var buf: [32:0]u8 = undefined;
-            const label_text = try std.fmt.bufPrintZ(&buf, "f{}(x):", .{i + 1});
-            _ = rg.label(.init(10, eq_y, 60, 20), label_text);
+        var i: usize = 0;
+        while (i < equations.items.len) {
+            const eq = equations.items[i];
 
-            if (rg.textBox(.init(70, eq_y, 170, 30), &eq.function, 256, eq.edit_mode)) {
+            // Equation text box
+            if (rg.textBox(.init(10, eq_y, 190, 30), &eq.function, 256, eq.edit_mode)) {
                 eq.edit_mode = !eq.edit_mode;
                 if (!eq.edit_mode) {
                     // Exiting edit mode - do final parse with error reporting
                     eq.updateAST(allocator, false);
                 }
+            }
+
+            // Delete button with trash icon
+            if (rg.button(.init(205, eq_y, 35, 30), "#143#")) {
+                // Delete this equation
+                const removed = equations.orderedRemove(i);
+                removed.deinit();
+                allocator.destroy(removed);
+                continue; // Don't increment i, check same index again
             }
 
             // Optimistically parse while editing for real-time updates
@@ -175,11 +306,12 @@ pub fn main() anyerror!void {
                 }
                 if (err_len > 0) {
                     const err_str = eq.error_msg[0..err_len :0];
-                    _ = rg.label(.init(70, eq_y + 32, 170, 15), err_str);
+                    _ = rg.label(.init(10, eq_y + 32, 190, 15), err_str);
                 }
             }
 
             eq_y += 40;
+            i += 1;
         }
     }
 }
