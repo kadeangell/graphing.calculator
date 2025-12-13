@@ -11,6 +11,7 @@ TBD:
 - polar graphs
 - parametric graphs
 - inequalities
+- animated parameters
 
 ## Example photos (later photos are more recent)
 
@@ -20,3 +21,4 @@ These 2 are before the marching squares algorithm was implemented:
 
 vs after: 
 ![](./docs/img3.png)
+![](./docs/img4.png)

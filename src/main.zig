@@ -89,53 +89,44 @@ pub fn main() anyerror!void {
             .pan_y = renderer.pan_y,
         };
 
-        // Draw grid and axes with zoom/pan
+        // Draw grid and axes
         renderer.drawGrid(viewport, width, height);
         renderer.drawAxes(viewport, width, height);
 
-        // Create evaluation context with x and y variables
+        // Create evaluation context
         var eval_context = std.StringHashMap(f32).init(allocator);
         defer eval_context.deinit();
         try eval_context.put("x", 0.0);
         try eval_context.put("y", 0.0);
 
-        // Build dependency graph and evaluate assignments
+        // Evaluate dependencies
         var dep_graph = equation.DependencyGraph.init(allocator);
         defer dep_graph.deinit();
-
         try dep_graph.build(equations.items);
+
         const eval_order = dep_graph.topologicalSort(equations.items.len) catch |err| blk: {
-            // If there's a circular dependency, just use original order
             if (err == error.CircularDependency) {
                 var order = try allocator.alloc(usize, equations.items.len);
-                for (0..equations.items.len) |i| {
-                    order[i] = i;
-                }
+                for (0..equations.items.len) |i| order[i] = i;
                 break :blk order;
-            } else {
-                return err;
-            }
+            } else return err;
         };
         defer allocator.free(eval_order);
 
-        // Evaluate assignments in dependency order
         for (eval_order) |idx| {
             const eq = equations.items[idx];
             if (eq.equation_type == .assignment) {
                 if (eq.evaluate(eval_context)) |value| {
-                    // Get the variable name from the assignment
                     if (eq.equation_ast) |eq_ast| {
                         if (eq_ast == .assignment) {
                             try eval_context.put(eq_ast.assignment.var_name, value);
                         }
                     }
-                } else |_| {
-                    // Ignore errors in assignments for now
-                }
+                } else |_| {}
             }
         }
 
-        // Plot all equations using marching squares
+        // Plot equations with caching
         try renderer.plotEquations(equations.items, &eval_context, viewport, allocator);
 
         // Render UI sidebar

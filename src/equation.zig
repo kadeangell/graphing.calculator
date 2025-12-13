@@ -13,15 +13,56 @@ pub const ParseError = parser_mod.ParseError;
 pub const parseFullEquation = parser_mod.parseFullEquation;
 pub const collectVariables = parser_mod.collectVariables;
 
+// Simple cache tracking (no textures - just skip re-rendering)
+pub const EquationCache = struct {
+    last_zoom: f32,
+    last_pan_x: f32,
+    last_pan_y: f32,
+    last_text_hash: u64,
+    rendered_once: bool,
+
+    pub fn init() EquationCache {
+        return .{
+            .last_zoom = 0,
+            .last_pan_x = 0,
+            .last_pan_y = 0,
+            .last_text_hash = 0,
+            .rendered_once = false,
+        };
+    }
+
+    pub fn deinit(_: *EquationCache) void {}
+
+    pub fn needsUpdate(self: *EquationCache, viewport: anytype, text_hash: u64) bool {
+        if (!self.rendered_once) return true;
+        if (text_hash != self.last_text_hash) return true;
+
+        const zoom_changed = @abs(self.last_zoom - viewport.zoom) > 0.001;
+        const pan_x_changed = @abs(self.last_pan_x - viewport.pan_x) > 0.01;
+        const pan_y_changed = @abs(self.last_pan_y - viewport.pan_y) > 0.01;
+
+        return zoom_changed or pan_x_changed or pan_y_changed;
+    }
+
+    pub fn markUpdated(self: *EquationCache, viewport: anytype, text_hash: u64) void {
+        self.last_zoom = viewport.zoom;
+        self.last_pan_x = viewport.pan_x;
+        self.last_pan_y = viewport.pan_y;
+        self.last_text_hash = text_hash;
+        self.rendered_once = true;
+    }
+};
+
 pub const Equation = struct {
     function: [256:0]u8,
     edit_mode: bool,
     color: rl.Color,
-    equation_ast: ?EquationAST,  // Changed from ast to equation_ast
-    equation_type: EquationType,  // NEW
+    equation_ast: ?EquationAST,
+    equation_type: EquationType,
     allocator: ?std.mem.Allocator,
     has_error: bool,
     error_msg: [128:0]u8,
+    cache: EquationCache, // NEW: Render cache
 
     pub fn init(color: rl.Color) Equation {
         return .{
@@ -29,10 +70,11 @@ pub const Equation = struct {
             .edit_mode = false,
             .color = color,
             .equation_ast = null,
-            .equation_type = .function_implicit,  // Default type
+            .equation_type = .function_implicit,
             .allocator = null,
             .has_error = false,
             .error_msg = std.mem.zeroes([128:0]u8),
+            .cache = EquationCache.init(),
         };
     }
 
@@ -42,6 +84,7 @@ pub const Equation = struct {
                 eq_ast.deinit(alloc);
             }
         }
+        self.cache.deinit();
     }
 
     pub fn setError(self: *Equation, msg: []const u8) void {

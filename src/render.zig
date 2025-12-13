@@ -153,7 +153,7 @@ pub const GraphRenderer = struct {
 
     pub fn plotEquations(
         self: *GraphRenderer,
-        equations: []const *Equation,
+        equations: []*Equation,
         eval_context: *std.StringHashMap(f32),
         viewport: Viewport,
         allocator: std.mem.Allocator,
@@ -170,12 +170,11 @@ pub const GraphRenderer = struct {
             // Skip assignments (they don't plot)
             if (eq.equation_type == .assignment) continue;
 
-            // Handle different equation types
+            // Render equation directly to screen
+            // TODO: Optimize marching squares performance for real-time rendering
             if (eq.equation_type == .constraint_implicit) {
-                // Use marching squares for all constraints
                 try MarchingSquares.plotImplicitCurve(eq, eval_context, viewport, eq.color, allocator);
             } else {
-                // Plot regular functions
                 try plotExplicitFunction(eq, eval_context, viewport, eq.color);
             }
         }
@@ -428,3 +427,4 @@ const MarchingSquares = struct {
         };
     }
 };
+
