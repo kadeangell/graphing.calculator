@@ -86,7 +86,6 @@ pub const ASTNode = union(enum) {
             .function_call => |fc| blk: {
                 // Single-argument functions
                 if (std.mem.eql(u8, fc.name, "sin") or
-                    std.mem.eql(u8, fc.name, "cos") or
                     std.mem.eql(u8, fc.name, "tan") or
                     std.mem.eql(u8, fc.name, "sqrt") or
                     std.mem.eql(u8, fc.name, "abs") or
@@ -101,6 +100,7 @@ pub const ASTNode = union(enum) {
                     std.mem.eql(u8, fc.name, "tanh") or
                     std.mem.eql(u8, fc.name, "floor") or
                     std.mem.eql(u8, fc.name, "ceil") or
+                    std.mem.eql(u8, fc.name, "sign") or
                     std.mem.eql(u8, fc.name, "round")) {
 
                     if (fc.args.len != 1) return error.WrongArgumentCount;
@@ -123,6 +123,7 @@ pub const ASTNode = union(enum) {
                     if (std.mem.eql(u8, fc.name, "floor")) break :blk @floor(arg);
                     if (std.mem.eql(u8, fc.name, "ceil")) break :blk @ceil(arg);
                     if (std.mem.eql(u8, fc.name, "round")) break :blk @round(arg);
+                    if (std.mem.eql(u8, fc.name, "sign")) break :blk { if (arg < 0.0) return -1.0 else return 1.0; };
                 }
 
                 // Two-argument functions
@@ -614,7 +615,8 @@ pub fn parseFullEquation(input: []const u8, allocator: std.mem.Allocator) ParseE
                               std.mem.eql(u8, fc.name, "ceil") or
                               std.mem.eql(u8, fc.name, "round") or
                               std.mem.eql(u8, fc.name, "min") or
-                              std.mem.eql(u8, fc.name, "max");
+                              std.mem.eql(u8, fc.name, "max") or
+                              std.mem.eql(u8, fc.name, "sign");
 
             if (is_builtin) {
                 // Built-in function on left → constraint
