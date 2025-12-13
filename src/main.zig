@@ -64,6 +64,9 @@ pub fn main() anyerror!void {
         const width = rl.getScreenWidth();
         const height = rl.getScreenHeight();
 
+        // Handle zoom and pan input
+        renderer.handleInput(sidebar_width);
+
         rl.beginDrawing();
         defer rl.endDrawing();
 
@@ -73,10 +76,6 @@ pub fn main() anyerror!void {
         const center_x = @divTrunc(width, 2);
         const center_y = @divTrunc(height, 2);
 
-        // Draw grid and axes
-        renderer.drawGrid(center_x, center_y, width, height);
-        renderer.drawAxes(center_x, center_y, width, height);
-
         // Create viewport for coordinate transformations
         const viewport = Viewport{
             .screen_width = width,
@@ -85,7 +84,14 @@ pub fn main() anyerror!void {
             .center_y = center_y,
             .grid_spacing = @floatFromInt(grid_spacing),
             .sidebar_width = sidebar_width,
+            .zoom = renderer.zoom,
+            .pan_x = renderer.pan_x,
+            .pan_y = renderer.pan_y,
         };
+
+        // Draw grid and axes with zoom/pan
+        renderer.drawGrid(viewport, width, height);
+        renderer.drawAxes(viewport, width, height);
 
         // Create evaluation context with x and y variables
         var eval_context = std.StringHashMap(f32).init(allocator);

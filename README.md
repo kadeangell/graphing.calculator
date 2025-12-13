@@ -7,6 +7,11 @@ This tool implements a fun set of tools to parse and render equations:
 - marching squares for rendering
 - internal variable definitions (eg. `x_1 =3` can be used in other equations)
 
+TBD:
+- polar graphs
+- parametric graphs
+- inequalities
+
 ## Example photos (later photos are more recent)
 
 These 2 are before the marching squares algorithm was implemented:

@@ -11,25 +11,30 @@ pub const Viewport = struct {
     center_y: i32,
     grid_spacing: f32,
     sidebar_width: i32,
+    zoom: f32, // Zoom level
+    pan_x: f32, // Pan offset in graph units
+    pan_y: f32,
 
     pub fn graphToScreenX(self: Viewport, graph_x: f32) f32 {
         const center_x_f: f32 = @floatFromInt(self.center_x);
-        return center_x_f + (graph_x * self.grid_spacing);
+        const adjusted_x = (graph_x - self.pan_x) * self.zoom;
+        return center_x_f + (adjusted_x * self.grid_spacing);
     }
 
     pub fn graphToScreenY(self: Viewport, graph_y: f32) f32 {
         const center_y_f: f32 = @floatFromInt(self.center_y);
-        return center_y_f - (graph_y * self.grid_spacing);
+        const adjusted_y = (graph_y - self.pan_y) * self.zoom;
+        return center_y_f - (adjusted_y * self.grid_spacing);
     }
 
     pub fn screenToGraphX(self: Viewport, screen_x: f32) f32 {
         const center_x_f: f32 = @floatFromInt(self.center_x);
-        return (screen_x - center_x_f) / self.grid_spacing;
+        return ((screen_x - center_x_f) / self.grid_spacing) / self.zoom + self.pan_x;
     }
 
     pub fn screenToGraphY(self: Viewport, screen_y: f32) f32 {
         const center_y_f: f32 = @floatFromInt(self.center_y);
-        return (center_y_f - screen_y) / self.grid_spacing;
+        return ((center_y_f - screen_y) / self.grid_spacing) / self.zoom + self.pan_y;
     }
 };
 
@@ -37,40 +42,113 @@ pub const GraphRenderer = struct {
     grid_spacing: i32,
     grid_color: rl.Color,
     axis_color: rl.Color,
+    zoom: f32, // Zoom level (1.0 = default, 2.0 = 2x zoom)
+    pan_x: f32, // Pan offset in graph units
+    pan_y: f32,
+    is_panning: bool, // Whether currently panning
 
     pub fn init(grid_spacing: i32, grid_color: rl.Color, axis_color: rl.Color) GraphRenderer {
         return .{
             .grid_spacing = grid_spacing,
             .grid_color = grid_color,
             .axis_color = axis_color,
+            .zoom = 1.0,
+            .pan_x = 0.0,
+            .pan_y = 0.0,
+            .is_panning = false,
         };
     }
 
-    pub fn drawGrid(self: *GraphRenderer, center_x: i32, center_y: i32, width: i32, height: i32) void {
-        // Draw vertical grid lines from center outward
-        var x: i32 = center_x;
-        while (x <= width) : (x += self.grid_spacing) {
-            rl.drawLine(x, 0, x, height, self.grid_color);
-        }
-        x = center_x - self.grid_spacing;
-        while (x >= 0) : (x -= self.grid_spacing) {
-            rl.drawLine(x, 0, x, height, self.grid_color);
+    pub fn handleInput(self: *GraphRenderer, sidebar_width: i32) void {
+        // Zoom with mouse wheel
+        const wheel = rl.getMouseWheelMove();
+        if (wheel != 0.0) {
+            const zoom_factor: f32 = 1.1;
+            if (wheel > 0) {
+                self.zoom *= zoom_factor;
+            } else {
+                self.zoom /= zoom_factor;
+            }
+            // Clamp zoom to reasonable range
+            self.zoom = std.math.clamp(self.zoom, 0.1, 10.0);
         }
 
-        // Draw horizontal grid lines from center outward
-        var y: i32 = center_y;
-        while (y <= height) : (y += self.grid_spacing) {
-            rl.drawLine(0, y, width, y, self.grid_color);
-        }
-        y = center_y - self.grid_spacing;
-        while (y >= 0) : (y -= self.grid_spacing) {
-            rl.drawLine(0, y, width, y, self.grid_color);
+        // Pan with middle mouse or Shift+Left mouse
+        const is_shift = rl.isKeyDown(rl.KeyboardKey.left_shift) or rl.isKeyDown(rl.KeyboardKey.right_shift);
+        const should_pan = rl.isMouseButtonDown(rl.MouseButton.middle) or
+                          (is_shift and rl.isMouseButtonDown(rl.MouseButton.left));
+
+        if (should_pan) {
+            const mouse_pos = rl.getMousePosition();
+            // Only pan if not in sidebar
+            if (mouse_pos.x > @as(f32, @floatFromInt(sidebar_width))) {
+                if (!self.is_panning) {
+                    self.is_panning = true;
+                } else {
+                    // Pan based on mouse delta
+                    const delta = rl.getMouseDelta();
+                    const grid_spacing_f: f32 = @floatFromInt(self.grid_spacing);
+                    self.pan_x -= delta.x / (grid_spacing_f * self.zoom);
+                    self.pan_y += delta.y / (grid_spacing_f * self.zoom);
+                }
+            }
+        } else {
+            self.is_panning = false;
         }
     }
 
-    pub fn drawAxes(self: *GraphRenderer, center_x: i32, center_y: i32, width: i32, height: i32) void {
-        rl.drawLine(center_x, 0, center_x, height, self.axis_color);
-        rl.drawLine(0, center_y, width, center_y, self.axis_color);
+    pub fn drawGrid(self: *GraphRenderer, viewport: Viewport, width: i32, height: i32) void {
+        // Calculate visible graph range
+        const sidebar_f: f32 = @floatFromInt(viewport.sidebar_width);
+        const width_f: f32 = @floatFromInt(width);
+        const height_f: f32 = @floatFromInt(height);
+
+        const x_min = viewport.screenToGraphX(sidebar_f);
+        const x_max = viewport.screenToGraphX(width_f);
+        const y_min = viewport.screenToGraphY(height_f);
+        const y_max = viewport.screenToGraphY(0.0);
+
+        // Draw vertical grid lines (at integer graph coordinates)
+        var graph_x = @floor(x_min);
+        while (graph_x <= x_max) : (graph_x += 1.0) {
+            const screen_x = viewport.graphToScreenX(graph_x);
+            const screen_x_i: i32 = @intFromFloat(screen_x);
+
+            if (screen_x_i >= viewport.sidebar_width) {
+                rl.drawLine(screen_x_i, 0, screen_x_i, height, self.grid_color);
+            }
+        }
+
+        // Draw horizontal grid lines (at integer graph coordinates)
+        var graph_y = @floor(y_min);
+        while (graph_y <= y_max) : (graph_y += 1.0) {
+            const screen_y = viewport.graphToScreenY(graph_y);
+            const screen_y_i: i32 = @intFromFloat(screen_y);
+
+            if (screen_y_i >= 0 and screen_y_i < height) {
+                const start_x: i32 = @max(viewport.sidebar_width, 0);
+                rl.drawLine(start_x, screen_y_i, width, screen_y_i, self.grid_color);
+            }
+        }
+    }
+
+    pub fn drawAxes(self: *GraphRenderer, viewport: Viewport, width: i32, height: i32) void {
+        // Draw x-axis (y = 0 in graph space)
+        const y_axis_screen = viewport.graphToScreenY(0.0);
+        const y_axis_i: i32 = @intFromFloat(y_axis_screen);
+
+        if (y_axis_i >= 0 and y_axis_i < height) {
+            const start_x: i32 = @max(viewport.sidebar_width, 0);
+            rl.drawLine(start_x, y_axis_i, width, y_axis_i, self.axis_color);
+        }
+
+        // Draw y-axis (x = 0 in graph space)
+        const x_axis_screen = viewport.graphToScreenX(0.0);
+        const x_axis_i: i32 = @intFromFloat(x_axis_screen);
+
+        if (x_axis_i >= viewport.sidebar_width and x_axis_i < width) {
+            rl.drawLine(x_axis_i, 0, x_axis_i, height, self.axis_color);
+        }
     }
 
     pub fn plotEquations(
@@ -157,10 +235,9 @@ const MarchingSquares = struct {
 
         // Adaptive cell size based on zoom level
         // Target ~5 pixel cells for good resolution
-        // viewport.grid_spacing is in pixels (e.g., 50 pixels = 1 graph unit)
-        // So cell_size in graph units = pixels_per_cell / viewport.grid_spacing
+        // Account for zoom: when zoomed in, use smaller cells in graph space
         const pixels_per_cell: f32 = 5.0;
-        const cell_size = pixels_per_cell / viewport.grid_spacing;
+        const cell_size = pixels_per_cell / (viewport.grid_spacing * viewport.zoom);
 
         // Calculate graph bounds
         const sidebar_f: f32 = @floatFromInt(viewport.sidebar_width);
