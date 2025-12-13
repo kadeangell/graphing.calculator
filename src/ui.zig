@@ -43,6 +43,50 @@ pub const UI = struct {
         while (i < equations.items.len) {
             const eq = equations.items[i];
 
+            // Handle clipboard operations when textbox is focused
+            if (eq.edit_mode) {
+                // Check for Cmd+C or Ctrl+C (copy)
+                const is_modifier = rl.isKeyDown(rl.KeyboardKey.left_super) or
+                                   rl.isKeyDown(rl.KeyboardKey.right_super) or
+                                   rl.isKeyDown(rl.KeyboardKey.left_control) or
+                                   rl.isKeyDown(rl.KeyboardKey.right_control);
+
+                if (is_modifier and rl.isKeyPressed(rl.KeyboardKey.c)) {
+                    // Copy current equation text to clipboard
+                    var text_len: usize = 0;
+                    while (text_len < eq.function.len and eq.function[text_len] != 0) {
+                        text_len += 1;
+                    }
+                    if (text_len > 0) {
+                        const text = eq.function[0..text_len :0];
+                        rl.setClipboardText(text);
+                    }
+                }
+
+                // Check for Cmd+V or Ctrl+V (paste)
+                if (is_modifier and rl.isKeyPressed(rl.KeyboardKey.v)) {
+                    // Get clipboard text
+                    const clipboard_text = rl.getClipboardText();
+                    // Find length and strip newlines
+                    var dest_idx: usize = 0;
+                    var src_idx: usize = 0;
+                    while (src_idx < clipboard_text.len and clipboard_text[src_idx] != 0 and dest_idx < 255) {
+                        const ch = clipboard_text[src_idx];
+                        // Skip newlines and carriage returns
+                        if (ch != '\n' and ch != '\r') {
+                            eq.function[dest_idx] = ch;
+                            dest_idx += 1;
+                        }
+                        src_idx += 1;
+                    }
+                    if (dest_idx > 0) {
+                        eq.function[dest_idx] = 0;
+                        // Parse immediately on paste
+                        eq.updateAST(allocator, true);
+                    }
+                }
+            }
+
             // Equation text box
             if (rg.textBox(.init(10, eq_y, 190, 30), &eq.function, 256, eq.edit_mode)) {
                 eq.edit_mode = !eq.edit_mode;
